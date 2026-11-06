@@ -1,16 +1,58 @@
 # DaoSense — Playwright e2e
 
-Автотесты витрины DaoSense (Shopify, тема Horizon). Покрыты: смена языка и рынка, синхронизация
-и блокировка корзины, CartMax-бандлы, главная, коллекции (PLP), страницы товара (PDP), поиск,
-корзина и checkout, блог и формы, членство и цены участника, личный кабинет, переводы, вёрстка,
-доступность и консоль.
+End-to-end autotests for the DaoSense storefront (Shopify, Horizon theme). Coverage: market and
+language switching, cart sync and locking, CartMax bundles, home page, collection pages (PLP),
+product pages (PDP), search, cart and checkout, blog and forms, membership and member pricing,
+account area, translations, layout, accessibility and the browser console.
 
-- Шаги тест-кейсов — `../test-cases/DAO_Sense_Test_Cases.xlsx` (колонка «Autotest (file:line)» ссылается на спеки).
-- Находки — `../test-cases/Findings.xlsx`, сверка с внешними кейсами — `../test-cases/DAO_comparison_2026-10-19.xlsx`.
-- Очередь задач по автотестам — `../BACKLOG.md`.
-- Что уже разобрано и как отработало — [REVIEW-STATUS.md](REVIEW-STATUS.md).
+- Test case steps live in `../test-cases/DAO_Sense_Test_Cases.xlsx` (the "Autotest (file:line)" column links to the specs).
+- Findings: `../test-cases/Findings.xlsx`; cross-check with the external spec: `../test-cases/DAO_comparison_2026-10-19.xlsx`.
+- Autotest backlog: `../BACKLOG.md`.
+- Which files have already been reviewed and how they ran last time — see [REVIEW-STATUS.md](REVIEW-STATUS.md).
 
-## Установка
+## Getting started
+
+For a fresh clone — from zero to a first green run:
+
+```bash
+git clone git@github.com:valeriialitovkinaqa/dao_auto.git
+cd dao_auto
+
+# 1. Install dependencies and browsers
+npm install
+npx playwright install
+
+# 2. Create a local .env (defaults already point at the live store)
+cp .env.example .env
+
+# 3. First run — critical path only, no auth required (~1–2 min)
+npm run test:smoke
+```
+
+That's it for the guest-facing suite (markets, catalog, cart as a guest, site health).
+
+**What else to know before running the full suite:**
+
+- **Member / customer tests need manual login.** Shopify Customer Accounts log in with a one-time
+  code sent by email, so they can't be automated. For member tests:
+  1. Put `MEMBER_EMAIL=<test member's email>` in `.env`.
+  2. Run `npm run auth:member` — a browser opens on the login page. Enter the email, then paste the
+     code from the inbox. The session is saved to `.auth/member.json` (git-ignored) and reused for
+     a few weeks. Repeat when it expires.
+  3. The same flow exists for a non-member customer: `npm run auth:customer`.
+
+  Without a session file, the matching tests skip themselves with a clear message.
+
+- **The live store rate-limits bursts.** Tests run in **one worker** with a 3-second pause between
+  tests (`TEST_PAUSE_MS`) and honor `Retry-After` on HTTP 429. If a run hits Cloudflare's bot check
+  (`cf-mitigated: challenge`), the test fails fast with `BotChallengeError` — take a 30–60 min
+  break or ask the store owner to allow-list the test IP. Prefer a preview theme (`PREVIEW_THEME_ID`)
+  over the published one.
+
+- **Tests never complete checkout.** They add to cart and switch markets, but they stop at the
+  checkout URL — nothing is ever paid.
+
+## Install
 
 ```bash
 npm install
@@ -18,230 +60,246 @@ npx playwright install
 cp .env.example .env
 ```
 
-## Запуск
+## Run
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `npm test` | все проекты: chromium, firefox, webkit, mobile-safari |
-| `npx playwright test --project=chromium` | один браузер |
-| `npm run test:smoke` | критический путь — тесты с тегом `@smoke` |
-| `npm run test:market` | `tests/market` (рынки, язык, корзина, бандлы, попап) |
-| `npm run test:membership` | цены глазами гостя + тесты участника |
-| `npm run test:member` | только тесты участника, chromium |
-| `npm run test:batched` | прогон по батчам с паузами — аргументы свои, см. ниже |
-| `npm run test:pdp:batched` | PDP по 4 рынкам, 3 круга, с паузами |
-| `npm run test:headed` | chromium с видимым окном |
-| `npm run list` | список тестов без запуска |
+| `npm test` | all projects: chromium, firefox, webkit, mobile-safari |
+| `npx playwright test --project=chromium` | one browser |
+| `npm run test:smoke` | critical path — tests tagged `@smoke` |
+| `npm run test:market` | `tests/market` (markets, language, cart, bundles, popup) |
+| `npm run test:membership` | pricing from the guest's point of view + member tests |
+| `npm run test:member` | member tests only, chromium |
+| `npm run test:batched` | batched run with pauses — custom arguments, see below |
+| `npm run test:pdp:batched` | PDP across 4 markets, 3 loops, with pauses |
+| `npm run test:headed` | chromium with a visible window |
+| `npm run list` | list tests without running them |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run report` | открыть HTML-отчёт |
-| `npm run auth:member`, `npm run auth:customer` | одноразовый ручной вход (см. «Сессии») |
+| `npm run report` | open the HTML report |
+| `npm run auth:member`, `npm run auth:customer` | one-off manual login (see "Sessions") |
 
-### Батчевый прогон (`scripts/run-batched.mjs`)
+### Batched run (`scripts/run-batched.mjs`)
 
-Live-магазин ограничивает частоту запросов, поэтому длинные прогоны лучше гонять батчами с большими
-паузами. Скрипт не обходит защиту: поймав Cloudflare или 429, он ждёт и повторяет батч **один** раз,
-после чего останавливается.
+The live store rate-limits requests, so long runs are better split into batches with long pauses.
+The script does not bypass protection: if it hits Cloudflare or 429, it waits and retries the batch
+**once**, then stops.
 
 ```bash
 node scripts/run-batched.mjs --repeat 3 tests/pages/pdp_DE.spec.ts "tests/pages/pdp.spec.ts::GB / en"
-node scripts/run-batched.mjs --dry tests/pages/pdp_SV.spec.ts     # только список тестов, без запросов к магазину
+node scripts/run-batched.mjs --dry tests/pages/pdp_SV.spec.ts     # list tests only, no requests to the store
 ```
 
-Батч — это spec-файл, при желании с фильтром по названию теста после `::`.
-Опции: `--repeat N` (кругов, по умолчанию 1), `--gap MIN` (пауза между батчами, 10),
-`--challenge-wait M` (пауза после Cloudflare перед повтором, 45), `--project NAME` (chromium),
+A batch is a spec file, optionally with a test-name filter after `::`.
+Options: `--repeat N` (loops, default 1), `--gap MIN` (pause between batches, 10),
+`--challenge-wait M` (pause after Cloudflare before the retry, 45), `--project NAME` (chromium),
 `--pause MS` (`TEST_PAUSE_MS`, 3000), `--dry`.
 
-Результаты одного прогона (обе папки в git не попадают):
+Output of one run (both folders are git-ignored):
 
 ```
-playwright-report/batches/<дата_время>/<батч>-r<круг>.log   # текстовый лог батча
-playwright-report/batches/<дата_время>/<батч>-r<круг>/      # HTML-отчёт батча
-playwright-report/batches/<дата_время>/summary.md           # таблица: passed / failed / challenge
-test-results/batches/<дата_время>/<батч>-r<круг>/           # трейсы, скриншоты, видео
+playwright-report/batches/<date_time>/<batch>-r<loop>.log   # batch log
+playwright-report/batches/<date_time>/<batch>-r<loop>/      # batch HTML report
+playwright-report/batches/<date_time>/summary.md            # table: passed / failed / challenge
+test-results/batches/<date_time>/<batch>-r<loop>/           # traces, screenshots, video
 ```
 
-## Окружение (`.env`)
+## Environment (`.env`)
 
-| Переменная | Назначение |
+| Variable | Purpose |
 |---|---|
-| `BASE_URL` | Витрина. По умолчанию `https://www.daosense.org` |
-| `PREVIEW_THEME_ID` | ID неопубликованной темы — добавляется как `preview_theme_id` ко всем переходам |
-| `STOREFRONT_PASSWORD` | Пароль витрины, если включена страница с паролем |
-| `TEST_PAUSE_MS` | Пауза после каждого теста, мс (по умолчанию 3000). Увеличьте до 5000–10000, если часто ловите 429. `0` — выключить |
-| `MARKET_POPUP_ENABLED` | `true`, если в теме включён попап выбора региона (иначе тесты попапа пропускаются) |
-| `RUN_DATA_CHECK` | `true` — включить обход каталога MKT-019 (запускать отдельно) |
-| `RUN_CHECKOUT` | `true` — CART-006 открывает Shopify checkout на 4 рынках (без оплаты) |
-| `PROMO_CODE` | Действующий промокод. Без него CART-003 проверяет только неверный код |
-| `MEMBER_EMAIL` | E-mail тестового участника — нужен для ACC-002 |
+| `BASE_URL` | Storefront URL. Defaults to `https://www.daosense.org` |
+| `PREVIEW_THEME_ID` | ID of an unpublished theme — appended as `preview_theme_id` to every navigation |
+| `STOREFRONT_PASSWORD` | Storefront password, if the password page is enabled |
+| `TEST_PAUSE_MS` | Pause after every test, ms (default 3000). Raise to 5000–10000 if you often hit 429. `0` disables it |
+| `MARKET_POPUP_ENABLED` | `true` if the theme has the region popup turned on (otherwise popup tests are skipped) |
+| `RUN_DATA_CHECK` | `true` — enable the MKT-019 catalog crawl (run it separately) |
+| `RUN_CHECKOUT` | `true` — CART-006 opens Shopify checkout on 4 markets (never pays) |
+| `PROMO_CODE` | A valid discount code. Without it CART-003 only checks the invalid-code path |
+| `MEMBER_EMAIL` | Test member's email — needed for ACC-002 |
 
-`MEMBER_LOGIN` и `CUSTOMER_LOGIN` выставляют сами скрипты `auth:member` / `auth:customer`, руками их задавать не нужно.
+`MEMBER_LOGIN` and `CUSTOMER_LOGIN` are set by the `auth:member` / `auth:customer` scripts themselves,
+you don't need to set them by hand.
 
-> Live-магазин ограничивает частоту запросов: при всплеске отвечает **HTTP 429** и показывает
-> проверку «Your connection needs to be verified». Поэтому тесты идут в **1 поток**, делают паузу между тестами
-> (`TEST_PAUSE_MS`), повторяют открытие страниц и запросы при 429 (ждут `Retry-After` или 3 → 6 → 12 с), а если ограничение не снимается — падают с ошибкой `RateLimitError`.
-> В этом случае подождите несколько минут и запустите снова (лучше по одному файлу или через батчевый прогон).
+> The live store rate-limits requests: on a burst it answers **HTTP 429** and shows the "Your
+> connection needs to be verified" check. That's why tests run in **1 worker**, pause between tests
+> (`TEST_PAUSE_MS`), and retry page opens and requests on 429 (waiting for `Retry-After` or 3 → 6 →
+> 12 s). If the limit does not clear, they fail with `RateLimitError`. Wait a few minutes and run
+> again (one file at a time or through the batched run).
 >
-> Если Cloudflare включил **проверку на бота** (ответ с заголовком `cf-mitigated: challenge`), тест сразу падает с
-> `BotChallengeError` — повторы и паузы тут не помогают, а обходить проверку нельзя. Сделайте перерыв 30–60 минут
-> или попросите владельца магазина добавить IP тестов в разрешённые / гоняйте тесты на dev- или превью-магазине.
+> If Cloudflare triggers the **bot check** (response with `cf-mitigated: challenge`), the test fails
+> immediately with `BotChallengeError` — retries and pauses do not help, and the check must not be
+> bypassed. Take a 30–60 minute break, or ask the store owner to allow-list the test IP, or run
+> against a dev/preview store.
 >
-> Тесты добавляют товары в корзину и переключают рынки, но **не доходят до оплаты**.
-> Предпочтительно гонять на превью-теме (`PREVIEW_THEME_ID`), а не на опубликованной.
+> Tests add products to the cart and switch markets, but **never complete payment**.
+> Prefer a preview theme (`PREVIEW_THEME_ID`) over the published one.
 
-## Структура
+## Layout
 
 ```
-helpers/fixtures.ts                 # test с фикстурой `store` + опции loadAssets / marketPopupSeen / closeNewsletterPopup
-helpers/storefront.ts               # Page Object: выбор региона, чистые URL (/de|/sv), API корзины, локаторы
-helpers/pdp-page.ts                 # общий набор проверок PDP (PDP-001…013), по прогону на рынок; здесь же тег @smoke
-helpers/collection-page.ts  # общий набор проверок PLP (PLP-001…016), по прогону на рынок
-helpers/auth.ts                     # пути к .auth/*.json и проверка наличия сессии
+helpers/fixtures.ts                 # test with a `store` fixture + options loadAssets / marketPopupSeen / closeNewsletterPopup
+helpers/storefront.ts               # Page Object: region picker, clean URLs (/de|/sv), cart API, locators
+helpers/pdp-page.ts                 # shared PDP checks (PDP-001…013), one run per market; @smoke tag lives here
+helpers/collection-page.ts          # shared PLP checks (PLP-001…016), one run per market
+helpers/auth.ts                     # paths to .auth/*.json and session presence check
 helpers/money.ts                    # parseMoney, memberPriceOf
-test-data/store.ts                  # рынки, языковые группы товаров, коллекции, тексты уведомлений
-scripts/run-batched.mjs             # прогон по батчам с паузами
+test-data/store.ts                  # markets, product language groups, collections, notice texts
+scripts/run-batched.mjs             # batched runs with pauses
 
-tests/auth/member.setup.ts          # ручной вход участника → .auth/member.json
-tests/auth/customer.setup.ts        # ручной вход клиента без членства → .auth/customer.json
-tests/market/                       # MKT-*: рынки, язык, синхронизация и блокировка корзины, CartMax-бандлы, попап
-tests/pages/                        # главная (homepage), коллекции ×3 (GB+US, DE, SV), PDP ×3 (GB+US, DE, SV)
-tests/smoke/                        # SMK-*, CART-*: главная/шапка/футер, поиск, корзина и checkout, блог, формы, 404
-tests/account/                      # MEM-*, ACC-*: гость, клиент без членства, участник
-tests/ui_extra/                     # TRN-*, LAY-*, A11Y-*, CON-*: переводы, вёрстка, клавиатура, контраст, консоль
+tests/auth/member.setup.ts          # manual member login → .auth/member.json
+tests/auth/customer.setup.ts        # manual non-member login → .auth/customer.json
+tests/market/                       # MKT-*: markets, language, cart sync and lock, CartMax bundles, popup
+tests/pages/                        # home page, collections ×3 (GB+US, DE, SV), PDP ×3 (GB+US, DE, SV)
+tests/smoke/                        # SMK-*, CART-*: home/header/footer, search, cart and checkout, blog, forms, 404
+tests/account/                      # MEM-*, ACC-*: guest, non-member customer, member
+tests/ui_extra/                     # TRN-*, LAY-*, A11Y-*, CON-*: translations, layout, keyboard, contrast, console
 ```
 
-Какие файлы уже разобраны по шагам и как они отработали на последнем прогоне — в
-[REVIEW-STATUS.md](REVIEW-STATUS.md). До 04.11.2026 это было видно по префиксу `CHECKED_` в имени файла;
-префикс убран (BL-05), статус переехал в отдельный файл.
+Which files have been reviewed step by step and how they ran last — see
+[REVIEW-STATUS.md](REVIEW-STATUS.md). Until 04.11.2026 that information was carried in a `CHECKED_`
+prefix in file names; the prefix is gone (BL-05) and the status moved into its own file.
 
-## Фикстуры и опции (`helpers/fixtures.ts`)
+## Fixtures and options (`helpers/fixtures.ts`)
 
-| Опция | По умолчанию | Что делает |
+| Option | Default | What it does |
 |---|---|---|
-| `loadAssets` | `false` | Картинки, видео, шрифты и аналитика **режутся**: на витрине это ~90% запросов, и без них реже ловится 429. Включать точечно: `test.use({ loadAssets: true })` |
-| `marketPopupSeen` | `true` | Подставляет `localStorage.market_selected`, чтобы попап первого визита не мешал |
-| `closeNewsletterPopup` | `true` | Автоматически закрывает всплывающее окно подписки (Shopify Forms), как это сделал бы покупатель |
+| `loadAssets` | `false` | Images, video, fonts and analytics are **blocked**: on the storefront that is ~90% of the requests, and skipping them makes 429 much less likely. Enable per file: `test.use({ loadAssets: true })` |
+| `marketPopupSeen` | `true` | Sets `localStorage.market_selected` so the first-visit popup never gets in the way |
+| `closeNewsletterPopup` | `true` | Auto-closes the subscribe popup (Shopify Forms) the way a shopper would |
 
-Отдельная фикстура `consoleErrors` собирает `pageerror` и `console.error` **только своего домена** —
-пиксели и сторонние приложения (Pinterest, Google, Shop Pay) не учитываются.
+A separate `consoleErrors` fixture collects `pageerror` and `console.error` **from the storefront
+domain only** — pixels and third-party apps (Pinterest, Google, Shop Pay) are ignored.
 
-Файлы, где картинки включены целиком: `tests/pages/homepage.spec.ts`, `tests/smoke/home-header-footer.spec.ts`,
-`tests/smoke/content-forms.spec.ts`, `tests/ui_extra/a11y-console.spec.ts`, `tests/ui_extra/translations-layout.spec.ts`.
-Точечно — PDP-003 (галерея) и PLP-006 (картинки карточек).
+Files where images are loaded in full: `tests/pages/homepage.spec.ts`,
+`tests/smoke/home-header-footer.spec.ts`, `tests/smoke/content-forms.spec.ts`,
+`tests/ui_extra/a11y-console.spec.ts`, `tests/ui_extra/translations-layout.spec.ts`.
+Partial enablement — PDP-003 (gallery) and PLP-006 (card images).
 
-## ID тест-кейсов
+## Test case IDs
 
-21.10.2026 у ID убран префикс `TC-`. Сейчас используются префиксы по вкладкам `DAO_Sense_Test_Cases.xlsx`:
+On 21.10.2026 the `TC-` prefix was dropped from IDs. The current prefixes mirror the tabs in
+`DAO_Sense_Test_Cases.xlsx`:
 
-| Префикс | Вкладка | Про что |
+| Prefix | Tab | About |
 |---|---|---|
-| `MKT` | Lang+Market | рынки, язык, синхронизация корзины |
-| `MEM` | Membership | членство и цены участника |
-| `ACC` | Account | личный кабинет |
-| `SMK` | Smoke | базовые проверки витрины |
-| `CART` | Cart | корзина и checkout |
-| `PLP` | PLP | страница коллекции |
-| `PDP` | PDP | страница товара |
-| `TRN` | Translations | переводы |
-| `LAY` | Layout | вёрстка |
-| `A11Y` | a11y | доступность |
-| `CON` | Console | ошибки в консоли |
+| `MKT` | Lang+Market | markets, language, cart sync |
+| `MEM` | Membership | membership and member pricing |
+| `ACC` | Account | account area |
+| `SMK` | Smoke | base storefront checks |
+| `CART` | Cart | cart and checkout |
+| `PLP` | PLP | collection page |
+| `PDP` | PDP | product page |
+| `TRN` | Translations | translations |
+| `LAY` | Layout | layout |
+| `A11Y` | a11y | accessibility |
+| `CON` | Console | console errors |
 
-Расшифровка и соответствие старым ID — на вкладке Legend; внешние E-кейсы — в `DAO_comparison_2026-10-19.xlsx`.
-`F-xx` в комментариях к тестам — находки из `Findings.xlsx`, `R-xx` — риски.
+Decoding and mapping to old IDs — on the Legend tab; external E-cases — in
+`DAO_comparison_2026-10-19.xlsx`. `F-xx` in test comments — findings from `Findings.xlsx`,
+`R-xx` — risks.
 
-## Сессии: участник и клиент без членства
+## Sessions: member and non-member customer
 
-Вход на витрину — по одноразовому коду из письма, поэтому он делается **вручную один раз**.
+Storefront login uses a one-time email code, so it is done **manually, once**.
 
-**Участник** (`tests/account/active-member.spec.ts`) — нужен аккаунт с тегом `active_subscription`:
+**Member** (`tests/account/active-member.spec.ts`) — needs an account tagged `active_subscription`:
 
-1. В `.env` укажите `MEMBER_EMAIL=<email участника>`.
-2. Запустите `npm run auth:member` — откроется браузер со страницей входа.
-3. Введите email и код из письма. Когда откроется кабинет, сессия сохранится в `.auth/member.json` (в git не попадает).
-4. Запускайте `npm run test:member`. Если сессия истекла — повторите шаг 2.
+1. In `.env`, set `MEMBER_EMAIL=<member's email>`.
+2. Run `npm run auth:member` — a browser opens on the login page.
+3. Enter the email and the code from the inbox. When the account area loads, the session is saved
+   to `.auth/member.json` (git-ignored).
+4. Run `npm run test:member`. If the session expired, repeat step 2.
 
-**Клиент без членства** (`tests/account/customer.spec.ts`) — так же: один раз `npm run auth:customer`,
-войти аккаунтом **без** тега `active_subscription` (сессия → `.auth/customer.json`).
+**Non-member customer** (`tests/account/customer.spec.ts`) — same flow: run `npm run auth:customer`
+once, log in with an account **without** the `active_subscription` tag (session → `.auth/customer.json`).
 
-Без файла сессии соответствующие тесты пропускаются. Корзина участника привязана к аккаунту — тесты очищают её
-до и после; в checkout не переходят, подписку не трогают и из аккаунта не выходят.
+Without the session file the matching tests are skipped. The member's cart is attached to the
+account — tests clear it before and after; they never enter checkout, never touch the subscription,
+and never log out.
 
-## Что остаётся ручным
+## What stays manual
 
-MKT-029, MEM-006, ACC-004, ACC-010…012, ACC-015, SMK-024, SMK-025, SMK-031, SMK-035 —
-нужны особые аккаунты/данные, настройка в Theme Editor, код из письма, отправка формы с hCaptcha или пароль витрины.
+MKT-029, MEM-006, ACC-004, ACC-010…012, ACC-015, SMK-024, SMK-025, SMK-031, SMK-035 — these need
+special accounts/data, a Theme Editor change, an email code, a form submission with hCaptcha or the
+storefront password.
 
-## Цены участника — что проверяется
+## Member pricing — what is checked
 
-| Товар | Гость | Участник |
+| Product | Guest | Member |
 |---|---|---|
-| «Free for members» (`foundations` и аналоги) | основная цена обычная; «💡 Member price: Free», «Regular price», ссылка «Buy now membership…» | основная цена «Free» + зачёркнутая; «💎 Member price: Free»; в корзине 0 |
-| Обычный (`september-from-digestion-to-clarity` и аналоги) | основная цена обычная; «💡 Member price: <цена × 0.67>», «Regular price», ссылка | основная цена обычная; «💎 Member price: <цена × 0.67>», «Regular price»; в корзине = Member price |
-| Членство `daosense-membership` | обычная цена, блока Member price нет | то же; участник может купить членство повторно (ожидаемо) |
+| "Free for members" (`foundations` and equivalents) | normal main price; "💡 Member price: Free", "Regular price", "Buy now membership…" link | main price "Free" + strikethrough; "💎 Member price: Free"; 0 in the cart |
+| Normal (`september-from-digestion-to-clarity` and equivalents) | normal main price; "💡 Member price: <price × 0.67>", "Regular price", link | normal main price; "💎 Member price: <price × 0.67>", "Regular price"; cart line = Member price |
+| Membership `daosense-membership` | normal price, no Member price block | same; a member can buy the membership again (expected) |
 
-Коэффициент — `MEMBER_PRICE_RATE = 0.67` в `test-data/store.ts`.
+The rate — `MEMBER_PRICE_RATE = 0.67` in `test-data/store.ts`.
 
-## Как переключается рынок
+## How the market is switched
 
-Каждый языковой товар ограничен своим рынком: DE/de/EUR, SE/sv/SEK, GB/en/GBP, US/en/USD.
-Ссылки в тестах такие же, как у покупателей: `https://www.daosense.org/sv/products/mjalten-i-centrum` — без `?country=`.
-Рынок выбирается так же, как в переключателе «Region and language» в шапке: `store.open(path, 'SE')` сначала
-отправляет форму `POST /localization` (страна + язык), Shopify запоминает регион в cookie `localization`,
-а затем открывается чистая ссылка `/sv{path}`. Если регион уже выбран, форма повторно не отправляется.
-Без выбора региона Shopify определяет рынок по IP, и товары чужого рынка отдают 404.
+Each language product is restricted to its own market: DE/de/EUR, SE/sv/SEK, GB/en/GBP, US/en/USD.
+Links in tests look exactly like shopper links: `https://www.daosense.org/sv/products/mjalten-i-centrum` —
+no `?country=`. The market is picked the same way as in the header "Region and language" selector:
+`store.open(path, 'SE')` first submits the `POST /localization` form (country + language), Shopify
+stores the region in the `localization` cookie, and then the clean `/sv{path}` link is opened. If
+the region is already selected, the form is not resubmitted. Without picking the region, Shopify
+decides the market by IP, and products of other markets answer 404.
 
-**Проверка рынка перед действиями.** После каждого `store.open(path, market)` и после каждого редиректа при смене
-языка (`store.waitForPath(path, market)`) тест сначала проверяет, что страница действительно открыта в нужном рынке,
-и только потом что-то нажимает или меняет:
-1. ссылка — языковой префикс в URL (`/de`, `/sv`, без префикса для английского);
-2. шапка — в переключателе «Region and language» выбрана нужная страна (`li[aria-current="true"]`) и показана её валюта;
-3. состояние Shopify — `window.Shopify.locale / country / currency`.
+**Market check before actions.** After every `store.open(path, market)` and after every redirect
+triggered by a language switch (`store.waitForPath(path, market)`), the test first verifies that
+the page actually opened in the expected market, and only then clicks or changes anything:
+1. link — language prefix in the URL (`/de`, `/sv`, no prefix for English);
+2. header — the "Region and language" selector has the right country picked (`li[aria-current="true"]`) and its currency is shown;
+3. Shopify state — `window.Shopify.locale / country / currency`.
 
-**Правило смены рынка на PDP.** Если на странице товара сменить страну или язык в шапке, магазин переводит на
-**главную выбранного рынка** (`/de`, `/sv`, `/`) — это ожидаемое поведение (MKT-031/032, `header-market-switch.spec.ts`).
-Смена языка через селектор на самой PDP + «Add to cart» — другой сценарий: там открывается товар-аналог (MKT-010…).
+**Rule for market switch on the PDP.** If you change country or language on a product page from
+the header, the store sends the shopper to the **home of the picked market** (`/de`, `/sv`, `/`) —
+this is the expected behavior (MKT-031/032, `header-market-switch.spec.ts`). Switching the language
+via the selector on the PDP itself + "Add to cart" is a different scenario: there an equivalent
+product opens (MKT-010…).
 
-Так ловится, например, ситуация, когда открылась `https://www.daosense.org/`, а в шапке выбрана Швеция (SEK).
-Сообщение об ошибке показывает, какая именно часть не совпала.
-Корзина читается через `/cart.js` изнутри страницы, поэтому cookies и рынок совпадают с браузером.
+This catches, for example, a case where `https://www.daosense.org/` opened but the header still
+has Sweden (SEK) picked. The error message says which part didn't match.
+The cart is read via `/cart.js` from inside the page, so cookies and market match the browser.
 
-## Тесты, которые пропускаются
+## Tests that are skipped
 
-| Тест | Когда пропускается |
+| Test | When skipped |
 |---|---|
-| MKT-015 | `fixme` — ожидаемое поведение для US + en не подтверждено (код уводит в GB, риск R-05) |
-| MKT-001…005, A11Y-005, TRN-004 (попап) | без `MARKET_POPUP_ENABLED=true` — попап выключен в теме. MKT-008 идёт всегда: он проверяет, что при выключенном попапе его и нет |
-| MKT-017 | без `PREVIEW_THEME_ID` — проверяет только превью-тему |
-| MKT-019 | без `RUN_DATA_CHECK=true`; только chromium — обход каталога (~100+ запросов), запускать отдельно |
-| CART-006 | без `RUN_CHECKOUT=true` — открывает Shopify checkout |
-| CART-001 | если в корзине нет степпера количества (`quantity-selector` закомментирован в `snippets/cart-products.liquid`) |
-| CART-004 | если в корзине нет поля заметки к заказу |
-| MEM-003…005, MEM-008, MEM-010, ACC-001…008, ACC-018/019, TRN-005 | без `.auth/member.json` — сначала `npm run auth:member` |
-| MEM-007, ACC-009, ACC-013 | без `.auth/customer.json` — сначала `npm run auth:customer` |
-| ACC-002 | без `MEMBER_EMAIL` в `.env` |
-| ACC-003 | если у участника нет заказов — «Member since» не рендерится (ACC-004) |
-| SMK-002, SMK-022, ACC-017, MKT-031/032, TRN-001 (шапка), A11Y-001/002 | на проекте mobile-safari — десктопные шапка, поиск и клавиатура |
+| MKT-015 | `fixme` — expected behavior for US + en is not confirmed (code redirects to GB, risk R-05) |
+| MKT-001…005, A11Y-005, TRN-004 (popup) | without `MARKET_POPUP_ENABLED=true` — popup is off in the theme. MKT-008 always runs: it verifies the popup is absent when it should be |
+| MKT-017 | without `PREVIEW_THEME_ID` — only checks a preview theme |
+| MKT-019 | without `RUN_DATA_CHECK=true`; chromium only — catalog crawl (~100+ requests), run separately |
+| CART-006 | without `RUN_CHECKOUT=true` — opens Shopify checkout |
+| CART-001 | if the cart has no quantity stepper (`quantity-selector` is commented out in `snippets/cart-products.liquid`) |
+| CART-004 | if the cart has no order note field |
+| MEM-003…005, MEM-008, MEM-010, ACC-001…008, ACC-018/019, TRN-005 | without `.auth/member.json` — run `npm run auth:member` first |
+| MEM-007, ACC-009, ACC-013 | without `.auth/customer.json` — run `npm run auth:customer` first |
+| ACC-002 | without `MEMBER_EMAIL` in `.env` |
+| ACC-003 | if the member has no orders — "Member since" is not rendered (ACC-004) |
+| SMK-002, SMK-022, ACC-017, MKT-031/032, TRN-001 (header), A11Y-001/002 | on the mobile-safari project — desktop header, search and keyboard |
 
-## Тесты, которые ожидаемо падают
+## Tests that are expected to fail
 
-Это дефекты витрины, а не ошибки тестов.
+These are storefront defects, not test bugs.
 
-| Тест | Находка / риск |
+| Test | Finding / risk |
 |---|---|
-| PDP-011 на `/de` и `/sv` | F-13 — ссылка «Buy now membership…» теряет языковой префикс |
-| PLP-015 на US, DE, SE | F-23 — фасет «Price» рендерится только в GB |
-| PLP-008 на DE | F-24 (сортировка по названию) и F-25 (по цене); проверка soft — один прогон показывает все сломанные опции сразу |
-| TRN-005 на DE и SE | R-12 — «Hello» и «Workbooks» захардкожены по-английски в `users-section.liquid` |
-| MKT-030 | R-07 — при сбое добавления старая строка уже удалена, товар теряется |
-| MKT-026, шаг re-add | R-08 — ссылка re-add без языкового префикса |
+| PDP-011 on `/de` and `/sv` | F-13 — "Buy now membership…" link drops the language prefix |
+| PLP-015 on US, DE, SE | F-23 — the "Price" facet is only rendered on GB |
+| PLP-008 on DE and SE | F-25 (price sort); soft check — one run reports every broken option at once |
+| TRN-005 on DE and SE | R-12 — "Hello" and "Workbooks" are hard-coded in English in `users-section.liquid` |
+| MKT-030 | R-07 — on a failed add the old line is already removed, the product is lost |
+| MKT-026, re-add step | R-08 — re-add link without the language prefix |
 
-По прежней версии README среди падающих числились также контраст (A11Y-004) и футер/вёрстка (LAY-*,
-риски R-15 и R-17). В коде этих тестов пометок о заведомом падении нет — статус подтвердить на ближайшем прогоне.
+An earlier version of this README also listed contrast (A11Y-004) and footer/layout (LAY-*, risks
+R-15 and R-17) among the expected failures. The code of those tests has no known-fail annotation —
+confirm the status on the next run. (F-24 — German title of `lunge-dickdarm` — is marked `Fixed` in
+Findings after a 06.11.2026 verification.)
 
-## Тест-данные
+## Test data
 
-Handle товаров и языковые группы сняты с live 16.10.2026 (`data-language-product-map` на PDP и `/products.json`).
-При изменении каталога обновите `test-data/store.ts`. Эталонные группы: `blood`, `foundations`, `september`, `october2025`;
-товар без языковых аналогов — `january-2026`; членство — `daosense-membership` (один handle во всех рынках).
-Источник правды по настройкам темы — ветка `live` (`config/settings_data.json`), `develop` может отставать.
+Product handles and language groups were pulled from live on 16.10.2026
+(`data-language-product-map` on the PDP and `/products.json`). When the catalog changes, update
+`test-data/store.ts`. Reference groups: `blood`, `foundations`, `september`, `october2025`;
+product with no language equivalents — `january-2026`; membership — `daosense-membership` (same
+handle on every market). The source of truth for theme settings is the `live` branch
+(`config/settings_data.json`), `develop` may lag behind.
