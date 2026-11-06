@@ -1,0 +1,14 @@
+node_modules/
+.env
+test-results/
+playwright-report/
+blob-report/
+# saved login sessions (contain session cookies)
+.auth/
+
+# macOS
+.DS_Store
+
+# stale local runs
+*.log
+home.png

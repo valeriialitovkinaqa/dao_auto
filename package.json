@@ -1,0 +1,28 @@
+{
+  "name": "dao-sense-autotests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright e2e tests for the DaoSense Shopify storefront (markets, language switch, cart sync, member pricing)",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:batched": "node scripts/run-batched.mjs",
+    "test:pdp:batched": "node scripts/run-batched.mjs --repeat 3 tests/pages/pdp_DE.spec.ts tests/pages/pdp_SV.spec.ts \"tests/pages/pdp.spec.ts::GB / en\" \"tests/pages/pdp.spec.ts::US / en\"",
+    "test:market": "playwright test tests/market",
+    "test:membership": "playwright test tests/account/guest-pricing.spec.ts tests/account/active-member.spec.ts",
+    "test:headed": "playwright test --headed --project=chromium",
+    "list": "playwright test --list",
+    "typecheck": "tsc --noEmit",
+    "report": "playwright show-report",
+    "auth:member": "MEMBER_LOGIN=true playwright test --project=member-login tests/auth/member.setup.ts",
+    "test:member": "playwright test tests/account/active-member.spec.ts --project=chromium",
+    "auth:customer": "CUSTOMER_LOGIN=true playwright test --project=member-login tests/auth/customer.setup.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.18.0",
+    "dotenv": "16.6.1",
+    "typescript": "5.9.2"
+  }
+}
